@@ -1,0 +1,177 @@
+---
+title: "Fifa_Kaggle"
+author: "Ryan Alvarez-Cohen"
+date: "3/22/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries and Data
+```{r}
+library(tidyverse)
+library(mice)
+library(car)
+library(VIM)
+library(leaps)
+
+#Load Training Data
+Fifa.Train.Data <- read.csv('/Users/RyanAlco/Downloads/TrainDataImputed.csv',header = T)
+#Load Testing Data
+Fifa.Test.Data <- read.csv('/Users/RyanAlco/Downloads/TestDataImputed.csv',header = T)
+```
+
+# Data Processing
+```{r}
+#Seperate Date Joined Column:
+Fifa.Train.Data <- separate(Fifa.Train.Data,'Joined',into = c('Joined.Day','Joined.Month','Joined.Year'), sep='-')
+Fifa.Test.Data <- separate(Fifa.Test.Data,'Joined',into = c('Joined.Day','Joined.Month','Joined.Year'), sep='-')
+
+#Improve Contract Valid till Column:
+Fifa.Train.Data$Contract.Valid.Until <- as.factor(2000 + as.numeric(str_extract( Fifa.Train.Data$Contract.Valid.Until ,  "..$" )))
+Fifa.Test.Data$Contract.Valid.Until <- as.factor(2000 + as.numeric(str_extract( Fifa.Test.Data$Contract.Valid.Until ,  "..$" )))
+
+#New Variable: Club Rank
+#Assign to Train
+Mean.by.Club <- Fifa.Train.Data %>% group_by(Club) %>% summarise(meanwage = mean(WageNew)) 
+Mean.by.Club <- Mean.by.Club %>% arrange(-meanwage)
+Mean.by.Club[,3] <- 1:651
+colnames(Mean.by.Club)[3] <- "Club.Rank"
+Mean.by.Club <- Mean.by.Club[,-2]
+Fifa.Train.Data <- Fifa.Train.Data %>% left_join(Mean.by.Club, by = "Club")
+#Assign to Test 
+Mean.by.Club <- Fifa.Train.Data %>% group_by(Club) %>% summarise(meanwage = mean(WageNew)) 
+Mean.by.Club <- Mean.by.Club %>% arrange(-meanwage)
+Mean.by.Club[,3] <- 1:651
+colnames(Mean.by.Club)[3] <- "Club.Rank"
+Mean.by.Club <- Mean.by.Club[,-2]
+Fifa.Test.Data <- Fifa.Test.Data %>% left_join(Mean.by.Club, by = "Club")
+
+#New Variable: Position.Category
+postional_assignment_fun <- function(x){
+  general.positions <- character(length = length(x$Ob))
+  
+  #Create Categories:
+  new <- as.character(x$Position)
+  defense <- c('LCB', 'CB', 'RCB', 'LB', 'RB', 'LWB', 'RWB')
+  midfield <- c('CAM', 'CDM', 'CM', 'LAM', 'LCM', 'LDM', 'LM', 'RM', 'RAM', 'RCM', 'RDM')
+  forward <- c('CF', 'LF', 'RF', 'ST', 'LS', 'RS', 'LW', 'RW')
+  goalie <- c('GK')
+  
+  #Assign Names to Categories:
+  for(i in 1:length(x$Ob)) {
+    if(new[i] %in% defense) {
+      general.positions[i] <- "DEF"
+    }
+    if(new[i] %in% midfield){
+      general.positions[i] <- "MID"
+    }
+    if(new[i] %in% forward){
+      general.positions[i] <- "ATT"
+    }
+    if (new[i] %in% goalie) { 
+      general.positions[i] <- "GK" 
+    }
+    if (is.na(new[i])) {
+      general.positions[i] <- NA 
+    }
+  }
+  #Return Vector of Positional Categories:
+  general.positions
+}
+
+#Add Positional.Category to existing datasets:
+#Training Data
+Fifa.Train.Data[,length(names(Fifa.Train.Data)) + 1] <- postional_assignment_fun(Fifa.Train.Data)
+colnames(Fifa.Train.Data)[length(names(Fifa.Train.Data))] <- "Position.Category"
+#Testing Data
+Fifa.Test.Data[,length(names(Fifa.Test.Data)) + 1] <- postional_assignment_fun(Fifa.Test.Data)
+colnames(Fifa.Test.Data)[length(names(Fifa.Test.Data))] <- "Position.Category"
+
+#New Variable: Rich.CLub
+mega_rich.clubs <- c('FC Barcelona', 'Real Madrid')
+
+super_rich.clubs <- c("Juventus","Manchester United","Chelsea","Paris Saint-Germain","Liverpool","Manchester City","FC Bayern M<fc>nchen","Arsenal")
+
+rich.clubs <- c('Bournemouth',"Brighton '&' Hove Albion",'Burnley','Cardiff','Crystal Palace','Everton','Fulham','Huddersfield','Leicester City','Newcastle United','Southampton','Tottenham Hotspur','Watford','West Ham United', 'Wolverhampton Wanderers',
+                "Atl<e9>tico Madrid",	"Valencia CF"	,"Getafe CF","Sevilla FC","RCD Espanyol",'Athletic Club de Bilbao',	'Real Sociedad','Real Betis',	'Deportivo Alav<e9>s','SD Eibar','CD Legan<e9>s','Villarreal CF','Levante UD','Real Valladolid CF','Celta de Vigo','Girona FC','SD Huesca','Rayo Vallecano',
+                'FC N<fc>rnberg','FSV Mainz','TSG 1899 Hoffenheim','Bayer 04 Leverkusen','Borussia M<f6>nchengladbach','Borussia Dortmund','Eintracht Frankfurt','FC Augsburg','FC Schalke 04','Fortuna Düsseldorf','Hannover 96','Hertha BSC','RB Leipzig','SC Freiburg','VfB Stuttgart','VfL Wolfsburg','Werder Bremen',
+          'LOSC Lille',	'Olympique Lyonnais','AS Saint-<c9>tienne',	'Olympique de Marseille','Montpellier HSC','OGC Nice','Stade de Reims','N<ee>mes Olympique','Stade Rennais FC',	'RC Strasbourg Alsace',	'FC Nantes','Angers SCO','FC Girondins de Bordeaux',	'Amiens SC',	'Toulouse Football Club',	'AS Monaco',	'Dijon FCO','Stade Malherbe Caen','En Avant de Guingamp',
+          'Napoli','Roma','Internacional','Lazio','AC Milan','Atalanta','Fiorentina','Torino','Sampdoria','Sassuolo',
+'Genoa','Chievo','Udinese','Bologna','Cagliari','SPAL', 'Crotone','Hellas Verona','Benevento')
+
+#Dummy Vector 
+rich.clubs.dummy <- numeric(0)
+#Create Function:
+rich.clubs.function <- function(x){
+  for(i in 1:length(x$Club)){
+    #Divide Club category into Rich/Not
+    if (x$Club[i] %in% mega_rich.clubs) {
+      rich.clubs.dummy[i] <- "Mega Rich"
+    }
+    else if (x$Club[i] %in% super_rich.clubs){
+      rich.clubs.dummy[i] <- "Super Rich"
+    } 
+    else if (x$Club[i] %in% rich.clubs) {
+      rich.clubs.dummy[i] <- "Rich"
+    }
+    else {
+      rich.clubs.dummy[i]<- "Poor"
+    }
+  }
+  #Return Dummy Vector
+  rich.clubs.dummy
+}
+
+    
+#Add Rich Club Variable to existing datasets:
+#Training Data
+Fifa.Train.Data[,length(names(Fifa.Train.Data)) + 1] <- rich.clubs.function(Fifa.Train.Data)
+colnames(Fifa.Train.Data)[length(names(Fifa.Train.Data))] <- "Rich.Club"
+#Testing Data
+Fifa.Test.Data[,length(names(Fifa.Test.Data)) + 1] <- rich.clubs.function(Fifa.Test.Data)
+colnames(Fifa.Test.Data)[length(names(Fifa.Test.Data))] <- "Rich.Club"
+
+#Split Fifa.Train.Data (Training Data downloaded) into Training/Testing Data for overfitting:
+percent.data.for.testing <- .3
+set.seed(704805)
+vals <- sample(1:length(Fifa.Train.Data$Ob), percent.data.for.testing * length(Fifa.Train.Data$Ob))
+
+Test.Train.Fifa.Data <- Fifa.Train.Data[vals,]
+Training.Train.Fifa.Data <- Fifa.Train.Data[-vals,]
+```
+
+# Linear Models
+```{r}
+test.model <-  lm( WageNew ~ Club.Rank + Overall + Real.Face + Position.Category + International.Reputation, data = Fifa.Train.Data)
+summary(powerTransform(cbind(WageNew , Overall, Club.Rank)~1,data=Fifa.Train.Data))
+
+#Backward check
+n <- length(Training.Train.Fifa.Data$WageNew)
+backAIC <- step(test.model,direction="backward", data=Training.Train.Fifa.Data)
+backBIC <- step(test.model,direction="backward", data=Training.Train.Fifa.Data, k=log(n))
+
+#Forward Check
+mint <- lm(log(WageNew)~1,data=Training.Train.Fifa.Data)
+forwardAIC <- step(mint, scope=list(lower=~1, upper=~I(Club.Rank^.5) + I(Overall^2) + Real.Face + Position.Category + International.Reputation + Rich.Club), direction="forward", data=Training.Train.Fifa.Data)
+forwardBIC <- step(mint, scope=list(lower=~1, upper=~I(Club.Rank^.5) + I(Overall^2) + Real.Face + Position.Category + International.Reputation + Rich.Club), direction="forward", data=Training.Train.Fifa.Data, k=log(n))
+
+#Final model
+final.model <-  lm( log(WageNew) ~ I(Club.Rank^.5) + I(Overall^2) + Real.Face + Position.Category + International.Reputation + Rich.Club, data = Test.Train.Fifa.Data)
+summary(final.model)
+#Test Rsq
+res <- as.numeric(exp(predict(final.model,newdata=Test.Train.Fifa.Data)))
+out <- data.frame(res)
+write.csv(out, file = "test1.csv")
+```
+
+# Final Model
+```{r}
+final.model <-  lm( log(WageNew) ~ I(Club.Rank^.5) + I(Overall^2) + Real.Face + Position.Category + International.Reputation + Rich.Club, data = Training.Train.Fifa.Data)
+res <- as.numeric(exp(predict(final.model,newdata=Fifa.Test.Data)))
+out <- data.frame(res)
+write.csv(out, file = "test1.csv")
+```
+
