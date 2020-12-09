@@ -1,1 +1,1 @@
-# I created a multiple linear regression model to predict the wages made by professional soccer players, based off of a subset of FIFA player statistics for a Kaggle competition. My model contained a total of 6 predictors (11 beta values) and produced an r^2 value of .919.
+# Multiple linear regression model to predict the wages made by professional soccer players, based off of a subset of FIFA player statistics for a Kaggle competition. The model contained a total of 6 predictors (11 beta values) and produced an r^2 value of .919.
